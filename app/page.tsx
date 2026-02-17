@@ -48,7 +48,10 @@ export default function Home() {
     });
   }, [slides.length]);
 
-  // AI generation — mode artefact (génère du HTML complet)
+  // Mode edit: le slide actif est un slide IA qu'on veut modifier
+  const isEditMode = !!(activeSlide?.htmlContent);
+
+  // AI generation — mode artefact (génère ou modifie du HTML complet)
   const handleGenerate = useCallback(async () => {
     if (!aiPrompt.trim()) return;
     setIsGenerating(true);
@@ -57,10 +60,17 @@ export default function Home() {
     const startTime = Date.now();
 
     try {
+      const body: Record<string, string> = { prompt: aiPrompt };
+
+      // Si on est en mode edit, on envoie le HTML existant pour modification
+      if (isEditMode && activeSlide?.htmlContent) {
+        body.existingHtml = activeSlide.htmlContent;
+      }
+
       const res = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: aiPrompt }),
+        body: JSON.stringify(body),
       });
 
       if (!res.ok) {
@@ -72,26 +82,44 @@ export default function Home() {
       const elapsed = Math.round((Date.now() - startTime) / 1000);
       setGenerationTime(elapsed);
 
-      const newSlide: Slide = {
-        id: uuidv4(),
-        type: 'content',
-        title: data.title || 'Slide généré',
-        elements: [],
-        backgroundColor: MIA.colors.white,
-        htmlContent: data.html,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
+      if (isEditMode) {
+        // Mode edit : on met à jour le slide actif en place
+        setSlides(prev =>
+          prev.map((s, i) =>
+            i === activeIndex
+              ? {
+                  ...s,
+                  htmlContent: data.html,
+                  title: data.title || s.title,
+                  updatedAt: new Date().toISOString(),
+                }
+              : s
+          )
+        );
+      } else {
+        // Mode création : on ajoute un nouveau slide
+        const newSlide: Slide = {
+          id: uuidv4(),
+          type: 'content',
+          title: data.title || 'Slide généré',
+          elements: [],
+          backgroundColor: MIA.colors.white,
+          htmlContent: data.html,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
 
-      setSlides(prev => [...prev, newSlide]);
-      setActiveIndex(slides.length);
+        setSlides(prev => [...prev, newSlide]);
+        setActiveIndex(slides.length);
+      }
+
       setAiPrompt('');
     } catch (err) {
       setAiError(err instanceof Error ? err.message : 'Erreur inconnue');
     } finally {
       setIsGenerating(false);
     }
-  }, [aiPrompt, slides.length]);
+  }, [aiPrompt, slides.length, isEditMode, activeSlide, activeIndex]);
 
   // PDF Export
   const handleExportPDF = useCallback(async () => {
@@ -433,7 +461,9 @@ export default function Home() {
               <div style={{ color: '#9ca3af', fontSize: 13 }}>
                 {isExporting
                   ? 'Capture de chaque slide en haute résolution'
-                  : "L'IA crée un slide complet avec HTML/CSS"}
+                  : isEditMode
+                    ? "L'IA applique les modifications demandées"
+                    : "L'IA crée un slide complet avec HTML/CSS"}
               </div>
               <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
             </div>
@@ -460,22 +490,43 @@ export default function Home() {
               left: 0,
               right: 0,
               backgroundColor: '#0f0f23',
-              borderTop: '1px solid #2a2a4a',
+              borderTop: isEditMode ? `2px solid ${MIA.colors.primary}44` : '1px solid #2a2a4a',
               padding: '12px 20px',
               display: 'flex',
               gap: '10px',
               alignItems: 'center',
             }}
           >
+            {/* Icône mode */}
             <div style={{
               width: 32, height: 32, borderRadius: '50%',
-              background: `linear-gradient(135deg, ${MIA.colors.primary}, #1535b0)`,
+              background: isEditMode
+                ? 'linear-gradient(135deg, #f59e0b, #d97706)'
+                : `linear-gradient(135deg, ${MIA.colors.primary}, #1535b0)`,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 16, flexShrink: 0,
+              fontSize: 15, flexShrink: 0,
               color: 'white',
             }}>
-              &#9733;
+              {isEditMode ? '\u270E' : '\u2733'}
             </div>
+
+            {/* Badge mode */}
+            {isEditMode && (
+              <div style={{
+                backgroundColor: '#f59e0b22',
+                border: '1px solid #f59e0b44',
+                borderRadius: 6,
+                padding: '4px 10px',
+                fontSize: 11,
+                color: '#f59e0b',
+                fontWeight: 700,
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
+              }}>
+                MODIFIER
+              </div>
+            )}
+
             <input
               type="text"
               value={aiPrompt}
@@ -483,11 +534,14 @@ export default function Home() {
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !isGenerating) handleGenerate();
               }}
-              placeholder="Décris le slide que tu veux... Ex: Un slide avec 3 chiffres clés sur l'adoption de l'IA en entreprise"
+              placeholder={isEditMode
+                ? "Demande une modification... Ex: Change le titre, ajoute un point, corrige la couleur..."
+                : "Décris le slide que tu veux... Ex: Un slide avec 3 chiffres clés sur l'adoption de l'IA"
+              }
               style={{
                 flex: 1,
                 backgroundColor: '#2a2a4a',
-                border: '1px solid #3a3a5a',
+                border: isEditMode ? '1px solid #f59e0b44' : '1px solid #3a3a5a',
                 borderRadius: 8,
                 color: 'white',
                 padding: '10px 16px',
@@ -501,8 +555,10 @@ export default function Home() {
               style={{
                 background: isGenerating
                   ? '#3b5bdb'
-                  : `linear-gradient(135deg, ${MIA.colors.primary}, #1535b0)`,
-                color: 'white',
+                  : isEditMode
+                    ? 'linear-gradient(135deg, #f59e0b, #d97706)'
+                    : `linear-gradient(135deg, ${MIA.colors.primary}, #1535b0)`,
+                color: isEditMode ? '#1a1a1a' : 'white',
                 border: 'none',
                 borderRadius: 8,
                 padding: '10px 24px',
@@ -514,7 +570,9 @@ export default function Home() {
                 fontFamily: MIA.fonts.title,
               }}
             >
-              {isGenerating ? 'Génération...' : 'Générer avec IA'}
+              {isGenerating
+                ? (isEditMode ? 'Modification...' : 'Génération...')
+                : (isEditMode ? 'Modifier ce slide' : 'Générer avec IA')}
             </button>
             {aiError && (
               <span style={{ color: '#f97316', fontSize: 12, maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -665,29 +723,25 @@ export default function Home() {
                   backgroundColor: '#1e1e3a', borderRadius: 8,
                   padding: 12, border: '1px solid #2a2a4a',
                 }}>
-                  <div style={{ color: '#9ca3af', fontSize: 12, marginBottom: 8 }}>
-                    Slide généré par IA
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    marginBottom: 8,
+                  }}>
+                    <div style={{
+                      width: 8, height: 8, borderRadius: '50%',
+                      backgroundColor: '#f59e0b',
+                    }} />
+                    <span style={{ color: '#f59e0b', fontSize: 12, fontWeight: 600 }}>
+                      Slide IA — Mode modification actif
+                    </span>
                   </div>
-                  <div style={{ color: '#6b7280', fontSize: 11 }}>
-                    {activeSlide.htmlContent.length} caractères HTML
+                  <div style={{ color: '#9ca3af', fontSize: 11, lineHeight: 1.5 }}>
+                    Utilisez la barre en bas pour demander des modifications sur ce slide.
+                    L&apos;IA appliquera vos changements sans tout recréer.
                   </div>
-                  <button
-                    onClick={() => {
-                      const prompt = window.prompt('Nouveau prompt pour régénérer ce slide :');
-                      if (!prompt) return;
-                      setAiPrompt(prompt);
-                    }}
-                    style={{
-                      marginTop: 8, width: '100%',
-                      backgroundColor: '#2a2a4a',
-                      border: '1px solid #3a3a5a',
-                      borderRadius: 6, color: 'white',
-                      padding: '6px 10px', fontSize: 12,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Régénérer ce slide
-                  </button>
+                  <div style={{ color: '#6b7280', fontSize: 10, marginTop: 8 }}>
+                    {activeSlide.htmlContent.length} car. HTML
+                  </div>
                 </div>
               )}
             </div>

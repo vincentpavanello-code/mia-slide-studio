@@ -1,14 +1,14 @@
 // app/api/generate/route.ts
-// Génère du HTML/CSS complet pour un slide (mode artefact)
+// Génère ou modifie du HTML/CSS complet pour un slide (mode artefact)
 
 import Anthropic from '@anthropic-ai/sdk';
-import { SYSTEM_PROMPT } from '@/lib/ai-prompt';
+import { SYSTEM_PROMPT, EDIT_SYSTEM_PROMPT } from '@/lib/ai-prompt';
 
 const client = new Anthropic();
 
 export async function POST(req: Request) {
   try {
-    const { prompt } = await req.json();
+    const { prompt, existingHtml } = await req.json();
 
     if (!prompt) {
       return Response.json(
@@ -17,14 +17,20 @@ export async function POST(req: Request) {
       );
     }
 
+    const isEdit = !!existingHtml;
+
+    const userMessage = isEdit
+      ? `Voici le HTML du slide actuel :\n\n${existingHtml}\n\nModification demandée : ${prompt}`
+      : prompt;
+
     const message = await client.messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 4096,
-      system: SYSTEM_PROMPT,
+      system: isEdit ? EDIT_SYSTEM_PROMPT : SYSTEM_PROMPT,
       messages: [
         {
           role: 'user',
-          content: prompt,
+          content: userMessage,
         },
       ],
     });
