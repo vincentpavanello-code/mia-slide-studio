@@ -1,12 +1,13 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import SlideRenderer from '@/components/SlideRenderer';
 import {
   createSlideByType,
   TEMPLATE_LIST,
 } from '@/lib/templates';
+import { exportSlidesToPDF } from '@/lib/export-pdf';
 import type { Slide, SlideType, GenerateResponse } from '@/lib/types';
 import { MIA } from '@/lib/charter';
 
@@ -22,6 +23,11 @@ export default function Home() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [generationTime, setGenerationTime] = useState<number | null>(null);
+
+  // PDF export state
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState<string | null>(null);
+  const pdfContainerRef = useRef<HTMLDivElement>(null);
 
   const activeSlide = slides[activeIndex];
 
@@ -66,7 +72,6 @@ export default function Home() {
       const elapsed = Math.round((Date.now() - startTime) / 1000);
       setGenerationTime(elapsed);
 
-      // Crée un slide avec le HTML généré par l'IA
       const newSlide: Slide = {
         id: uuidv4(),
         type: 'content',
@@ -88,11 +93,67 @@ export default function Home() {
     }
   }, [aiPrompt, slides.length]);
 
-  // Calculate scale to fit canvas in viewport
+  // PDF Export
+  const handleExportPDF = useCallback(async () => {
+    if (isExporting || slides.length === 0) return;
+    setIsExporting(true);
+    setExportProgress('Préparation...');
+
+    try {
+      // Attendre que le conteneur off-screen soit rendu avec tous les slides
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      const container = pdfContainerRef.current;
+      if (!container) throw new Error('Conteneur PDF introuvable');
+
+      const slideElements = Array.from(
+        container.querySelectorAll<HTMLElement>('[data-pdf-slide]')
+      );
+
+      if (slideElements.length === 0) throw new Error('Aucun slide à exporter');
+
+      await exportSlidesToPDF(
+        slideElements,
+        'presentation-mia.pdf',
+        (current, total) => {
+          setExportProgress(`Export slide ${current + 1}/${total}...`);
+        },
+      );
+
+      setExportProgress(null);
+    } catch (err) {
+      console.error('PDF export error:', err);
+      setExportProgress(null);
+      alert(`Erreur export PDF : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
+    } finally {
+      setIsExporting(false);
+    }
+  }, [isExporting, slides]);
+
   const canvasScale = 0.65;
 
   return (
     <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column' }}>
+      {/* Conteneur off-screen pour l'export PDF — tous les slides à taille réelle */}
+      {isExporting && (
+        <div
+          ref={pdfContainerRef}
+          style={{
+            position: 'fixed',
+            left: '-9999px',
+            top: 0,
+            zIndex: -1,
+            opacity: 1,
+          }}
+        >
+          {slides.map((slide) => (
+            <div key={slide.id} data-pdf-slide style={{ marginBottom: 10 }}>
+              <SlideRenderer slide={slide} />
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Toolbar */}
       <div
         style={{
@@ -126,6 +187,27 @@ export default function Home() {
         </button>
 
         <div style={{ flex: 1 }} />
+
+        {/* Export PDF button */}
+        <button
+          onClick={handleExportPDF}
+          disabled={isExporting || slides.length === 0}
+          style={{
+            ...toolbarBtnStyle,
+            background: isExporting
+              ? '#2a2a4a'
+              : `linear-gradient(135deg, #dc2626, #b91c1c)`,
+            border: 'none',
+            color: 'white',
+            fontWeight: 600,
+            opacity: isExporting ? 0.6 : 1,
+            cursor: isExporting ? 'not-allowed' : 'pointer',
+            padding: '6px 18px',
+          }}
+        >
+          {isExporting ? (exportProgress || 'Export...') : 'Export PDF'}
+        </button>
+
         <span style={{ color: '#6b7280', fontSize: 13 }}>
           {slides.length} slide{slides.length > 1 ? 's' : ''}
         </span>
@@ -178,7 +260,6 @@ export default function Home() {
               >
                 {i + 1}
               </div>
-              {/* AI badge */}
               {slide.htmlContent && (
                 <div
                   style={{
@@ -323,8 +404,8 @@ export default function Home() {
             </div>
           )}
 
-          {/* Generating overlay */}
-          {isGenerating && (
+          {/* Generating / Exporting overlay */}
+          {(isGenerating || isExporting) && (
             <div
               style={{
                 position: 'absolute',
@@ -340,14 +421,19 @@ export default function Home() {
             >
               <div style={{
                 width: 48, height: 48, border: '3px solid rgba(255,255,255,0.2)',
-                borderTopColor: MIA.colors.primary, borderRadius: '50%',
+                borderTopColor: isExporting ? '#dc2626' : MIA.colors.primary,
+                borderRadius: '50%',
                 animation: 'spin 1s linear infinite',
               }} />
               <div style={{ color: 'white', fontSize: 16, fontWeight: 600, fontFamily: MIA.fonts.title }}>
-                Génération du slide en cours...
+                {isExporting
+                  ? (exportProgress || 'Export PDF en cours...')
+                  : 'Génération du slide en cours...'}
               </div>
               <div style={{ color: '#9ca3af', fontSize: 13 }}>
-                L&apos;IA crée un slide complet avec HTML/CSS
+                {isExporting
+                  ? 'Capture de chaque slide en haute résolution'
+                  : "L'IA crée un slide complet avec HTML/CSS"}
               </div>
               <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
             </div>
@@ -491,7 +577,6 @@ export default function Home() {
                 />
               </div>
 
-              {/* Template-based slides: edit subtitle, badge, etc */}
               {!activeSlide.htmlContent && (
                 <>
                   <div>
@@ -575,7 +660,6 @@ export default function Home() {
                 </>
               )}
 
-              {/* AI-generated slide: show HTML info */}
               {activeSlide.htmlContent && (
                 <div style={{
                   backgroundColor: '#1e1e3a', borderRadius: 8,
@@ -589,7 +673,6 @@ export default function Home() {
                   </div>
                   <button
                     onClick={() => {
-                      // Regénérer ce slide
                       const prompt = window.prompt('Nouveau prompt pour régénérer ce slide :');
                       if (!prompt) return;
                       setAiPrompt(prompt);
