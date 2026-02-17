@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
+import { v4 as uuidv4 } from 'uuid';
 import SlideRenderer from '@/components/SlideRenderer';
 import {
   createSlideByType,
@@ -18,9 +19,9 @@ export default function Home() {
 
   // AI prompt state
   const [aiPrompt, setAiPrompt] = useState('');
-  const [aiSlideType, setAiSlideType] = useState<SlideType>('content');
   const [isGenerating, setIsGenerating] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
+  const [generationTime, setGenerationTime] = useState<number | null>(null);
 
   const activeSlide = slides[activeIndex];
 
@@ -41,20 +42,19 @@ export default function Home() {
     });
   }, [slides.length]);
 
-  // AI generation
+  // AI generation — mode artefact (génère du HTML complet)
   const handleGenerate = useCallback(async () => {
     if (!aiPrompt.trim()) return;
     setIsGenerating(true);
     setAiError(null);
+    setGenerationTime(null);
+    const startTime = Date.now();
 
     try {
       const res = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: aiPrompt,
-          slideType: aiSlideType,
-        }),
+        body: JSON.stringify({ prompt: aiPrompt }),
       });
 
       if (!res.ok) {
@@ -63,33 +63,30 @@ export default function Home() {
       }
 
       const data: GenerateResponse = await res.json();
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      setGenerationTime(elapsed);
 
-      // Create a new slide populated with AI data
-      const newSlide = createSlideByType(aiSlideType);
-      newSlide.title = data.title || newSlide.title;
-      newSlide.subtitle = data.subtitle || newSlide.subtitle;
-      if (data.badge) newSlide.badge = data.badge;
-
-      newSlide.data = {
-        ...newSlide.data,
-        ...(data.figures && { figures: data.figures }),
-        ...(data.columns && { columns: data.columns }),
-        ...(data.steps && { steps: data.steps }),
-        ...(data.quote && { quote: data.quote }),
-        ...(data.keyMessage && { keyMessage: data.keyMessage }),
-        ...(data.bulletPoints && { bulletPoints: data.bulletPoints }),
-        ...(data.number && { number: data.number }),
+      // Crée un slide avec le HTML généré par l'IA
+      const newSlide: Slide = {
+        id: uuidv4(),
+        type: 'content',
+        title: data.title || 'Slide généré',
+        elements: [],
+        backgroundColor: MIA.colors.white,
+        htmlContent: data.html,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
       };
 
       setSlides(prev => [...prev, newSlide]);
-      setActiveIndex(slides.length); // jump to new slide
+      setActiveIndex(slides.length);
       setAiPrompt('');
     } catch (err) {
       setAiError(err instanceof Error ? err.message : 'Erreur inconnue');
     } finally {
       setIsGenerating(false);
     }
-  }, [aiPrompt, aiSlideType, slides.length]);
+  }, [aiPrompt, slides.length]);
 
   // Calculate scale to fit canvas in viewport
   const canvasScale = 0.65;
@@ -181,6 +178,24 @@ export default function Home() {
               >
                 {i + 1}
               </div>
+              {/* AI badge */}
+              {slide.htmlContent && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 4,
+                    left: 6,
+                    fontSize: 9,
+                    color: 'white',
+                    backgroundColor: MIA.colors.primary,
+                    borderRadius: 3,
+                    padding: '1px 4px',
+                    fontWeight: 700,
+                  }}
+                >
+                  IA
+                </div>
+              )}
               {slides.length > 1 && (
                 <button
                   onClick={(e) => {
@@ -308,6 +323,36 @@ export default function Home() {
             </div>
           )}
 
+          {/* Generating overlay */}
+          {isGenerating && (
+            <div
+              style={{
+                position: 'absolute',
+                inset: 0,
+                backgroundColor: 'rgba(0,0,0,0.5)',
+                zIndex: 50,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 16,
+              }}
+            >
+              <div style={{
+                width: 48, height: 48, border: '3px solid rgba(255,255,255,0.2)',
+                borderTopColor: MIA.colors.primary, borderRadius: '50%',
+                animation: 'spin 1s linear infinite',
+              }} />
+              <div style={{ color: 'white', fontSize: 16, fontWeight: 600, fontFamily: MIA.fonts.title }}>
+                Génération du slide en cours...
+              </div>
+              <div style={{ color: '#9ca3af', fontSize: 13 }}>
+                L&apos;IA crée un slide complet avec HTML/CSS
+              </div>
+              <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+            </div>
+          )}
+
           {/* Slide display */}
           {activeSlide && (
             <div
@@ -336,25 +381,15 @@ export default function Home() {
               alignItems: 'center',
             }}
           >
-            <select
-              value={aiSlideType}
-              onChange={(e) => setAiSlideType(e.target.value as SlideType)}
-              style={{
-                backgroundColor: '#2a2a4a',
-                border: '1px solid #3a3a5a',
-                borderRadius: 6,
-                color: 'white',
-                padding: '8px 12px',
-                fontSize: 13,
-                outline: 'none',
-              }}
-            >
-              {TEMPLATE_LIST.map((t) => (
-                <option key={t.type} value={t.type}>
-                  {t.label}
-                </option>
-              ))}
-            </select>
+            <div style={{
+              width: 32, height: 32, borderRadius: '50%',
+              background: `linear-gradient(135deg, ${MIA.colors.primary}, #1535b0)`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 16, flexShrink: 0,
+              color: 'white',
+            }}>
+              &#9733;
+            </div>
             <input
               type="text"
               value={aiPrompt}
@@ -362,14 +397,14 @@ export default function Home() {
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !isGenerating) handleGenerate();
               }}
-              placeholder="Décris le slide que tu veux... Ex: Un slide avec 3 chiffres clés sur l'adoption de l'IA"
+              placeholder="Décris le slide que tu veux... Ex: Un slide avec 3 chiffres clés sur l'adoption de l'IA en entreprise"
               style={{
                 flex: 1,
                 backgroundColor: '#2a2a4a',
                 border: '1px solid #3a3a5a',
-                borderRadius: 6,
+                borderRadius: 8,
                 color: 'white',
-                padding: '8px 14px',
+                padding: '10px 16px',
                 fontSize: 14,
                 outline: 'none',
               }}
@@ -378,29 +413,37 @@ export default function Home() {
               onClick={handleGenerate}
               disabled={isGenerating || !aiPrompt.trim()}
               style={{
-                backgroundColor: isGenerating ? '#3b5bdb' : MIA.colors.primary,
+                background: isGenerating
+                  ? '#3b5bdb'
+                  : `linear-gradient(135deg, ${MIA.colors.primary}, #1535b0)`,
                 color: 'white',
                 border: 'none',
-                borderRadius: 6,
-                padding: '8px 20px',
+                borderRadius: 8,
+                padding: '10px 24px',
                 fontSize: 14,
                 fontWeight: 600,
                 cursor: isGenerating ? 'not-allowed' : 'pointer',
                 opacity: isGenerating || !aiPrompt.trim() ? 0.6 : 1,
                 whiteSpace: 'nowrap',
+                fontFamily: MIA.fonts.title,
               }}
             >
-              {isGenerating ? 'Génération...' : 'Générer'}
+              {isGenerating ? 'Génération...' : 'Générer avec IA'}
             </button>
             {aiError && (
-              <span style={{ color: '#f97316', fontSize: 12, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <span style={{ color: '#f97316', fontSize: 12, maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {aiError}
+              </span>
+            )}
+            {generationTime !== null && !aiError && (
+              <span style={{ color: '#4ade80', fontSize: 12, whiteSpace: 'nowrap' }}>
+                {generationTime}s
               </span>
             )}
           </div>
         </div>
 
-        {/* Right panel - Properties (placeholder for Phase 2) */}
+        {/* Right panel - Properties */}
         <div
           style={{
             width: 280,
@@ -427,7 +470,9 @@ export default function Home() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div>
                 <label style={labelStyle}>Type</label>
-                <div style={readOnlyStyle}>{activeSlide.type}</div>
+                <div style={readOnlyStyle}>
+                  {activeSlide.htmlContent ? 'IA (HTML)' : activeSlide.type}
+                </div>
               </div>
               <div>
                 <label style={labelStyle}>Titre</label>
@@ -445,86 +490,121 @@ export default function Home() {
                   style={inputStyle}
                 />
               </div>
-              <div>
-                <label style={labelStyle}>Sous-titre</label>
-                <input
-                  type="text"
-                  value={activeSlide.subtitle || ''}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setSlides(prev =>
-                      prev.map((s, i) =>
-                        i === activeIndex ? { ...s, subtitle: val || undefined, updatedAt: new Date().toISOString() } : s
-                      )
-                    );
-                  }}
-                  style={inputStyle}
-                />
-              </div>
-              {activeSlide.badge !== undefined && (
-                <div>
-                  <label style={labelStyle}>Badge</label>
-                  <input
-                    type="text"
-                    value={activeSlide.badge || ''}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setSlides(prev =>
-                        prev.map((s, i) =>
-                          i === activeIndex ? { ...s, badge: val || undefined, updatedAt: new Date().toISOString() } : s
-                        )
-                      );
-                    }}
-                    style={inputStyle}
-                  />
-                </div>
-              )}
 
-              {/* Bullet Points editing for content slides */}
-              {activeSlide.data?.bulletPoints && (
-                <div>
-                  <label style={labelStyle}>Points clés</label>
-                  {activeSlide.data.bulletPoints.map((bp, bpi) => (
+              {/* Template-based slides: edit subtitle, badge, etc */}
+              {!activeSlide.htmlContent && (
+                <>
+                  <div>
+                    <label style={labelStyle}>Sous-titre</label>
                     <input
-                      key={bpi}
                       type="text"
-                      value={bp}
+                      value={activeSlide.subtitle || ''}
                       onChange={(e) => {
                         const val = e.target.value;
                         setSlides(prev =>
-                          prev.map((s, i) => {
-                            if (i !== activeIndex) return s;
-                            const bulletPoints = [...(s.data?.bulletPoints || [])];
-                            bulletPoints[bpi] = val;
-                            return { ...s, data: { ...s.data, bulletPoints }, updatedAt: new Date().toISOString() };
-                          })
+                          prev.map((s, i) =>
+                            i === activeIndex ? { ...s, subtitle: val || undefined, updatedAt: new Date().toISOString() } : s
+                          )
                         );
                       }}
-                      style={{ ...inputStyle, marginBottom: 6 }}
+                      style={inputStyle}
                     />
-                  ))}
-                </div>
+                  </div>
+                  {activeSlide.badge !== undefined && (
+                    <div>
+                      <label style={labelStyle}>Badge</label>
+                      <input
+                        type="text"
+                        value={activeSlide.badge || ''}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setSlides(prev =>
+                            prev.map((s, i) =>
+                              i === activeIndex ? { ...s, badge: val || undefined, updatedAt: new Date().toISOString() } : s
+                            )
+                          );
+                        }}
+                        style={inputStyle}
+                      />
+                    </div>
+                  )}
+                  {activeSlide.data?.bulletPoints && (
+                    <div>
+                      <label style={labelStyle}>Points clés</label>
+                      {activeSlide.data.bulletPoints.map((bp, bpi) => (
+                        <input
+                          key={bpi}
+                          type="text"
+                          value={bp}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setSlides(prev =>
+                              prev.map((s, i) => {
+                                if (i !== activeIndex) return s;
+                                const bulletPoints = [...(s.data?.bulletPoints || [])];
+                                bulletPoints[bpi] = val;
+                                return { ...s, data: { ...s.data, bulletPoints }, updatedAt: new Date().toISOString() };
+                              })
+                            );
+                          }}
+                          style={{ ...inputStyle, marginBottom: 6 }}
+                        />
+                      ))}
+                    </div>
+                  )}
+                  {activeSlide.data?.keyMessage !== undefined && (
+                    <div>
+                      <label style={labelStyle}>Message clé</label>
+                      <input
+                        type="text"
+                        value={activeSlide.data.keyMessage || ''}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setSlides(prev =>
+                            prev.map((s, i) =>
+                              i === activeIndex
+                                ? { ...s, data: { ...s.data, keyMessage: val }, updatedAt: new Date().toISOString() }
+                                : s
+                            )
+                          );
+                        }}
+                        style={inputStyle}
+                      />
+                    </div>
+                  )}
+                </>
               )}
 
-              {/* Key Message editing */}
-              {activeSlide.data?.keyMessage !== undefined && (
-                <div>
-                  <label style={labelStyle}>Message clé</label>
-                  <input
-                    type="text"
-                    value={activeSlide.data.keyMessage || ''}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setSlides(prev =>
-                        prev.map((s, i) =>
-                          i === activeIndex
-                            ? { ...s, data: { ...s.data, keyMessage: val }, updatedAt: new Date().toISOString() }
-                            : s
-                        )
-                      );
+              {/* AI-generated slide: show HTML info */}
+              {activeSlide.htmlContent && (
+                <div style={{
+                  backgroundColor: '#1e1e3a', borderRadius: 8,
+                  padding: 12, border: '1px solid #2a2a4a',
+                }}>
+                  <div style={{ color: '#9ca3af', fontSize: 12, marginBottom: 8 }}>
+                    Slide généré par IA
+                  </div>
+                  <div style={{ color: '#6b7280', fontSize: 11 }}>
+                    {activeSlide.htmlContent.length} caractères HTML
+                  </div>
+                  <button
+                    onClick={() => {
+                      // Regénérer ce slide
+                      const prompt = window.prompt('Nouveau prompt pour régénérer ce slide :');
+                      if (!prompt) return;
+                      setAiPrompt(prompt);
                     }}
-                    style={inputStyle}
-                  />
+                    style={{
+                      marginTop: 8, width: '100%',
+                      backgroundColor: '#2a2a4a',
+                      border: '1px solid #3a3a5a',
+                      borderRadius: 6, color: 'white',
+                      padding: '6px 10px', fontSize: 12,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Régénérer ce slide
+                  </button>
                 </div>
               )}
             </div>
@@ -546,13 +626,14 @@ export default function Home() {
           flexShrink: 0,
         }}
       >
-        MIA Slide Studio — Phase 1 | Slide {activeIndex + 1}/{slides.length}
+        MIA Slide Studio | Slide {activeIndex + 1}/{slides.length}
+        {activeSlide?.htmlContent && ' | Généré par IA'}
       </div>
     </div>
   );
 }
 
-// Shared inline styles for the property panel (Tailwind-free)
+// Shared inline styles
 const toolbarBtnStyle: React.CSSProperties = {
   backgroundColor: '#2a2a4a',
   border: '1px solid #3a3a5a',

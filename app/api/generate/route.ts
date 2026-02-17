@@ -1,4 +1,5 @@
 // app/api/generate/route.ts
+// Génère du HTML/CSS complet pour un slide (mode artefact)
 
 import Anthropic from '@anthropic-ai/sdk';
 import { SYSTEM_PROMPT } from '@/lib/ai-prompt';
@@ -7,34 +8,35 @@ const client = new Anthropic();
 
 export async function POST(req: Request) {
   try {
-    const { prompt, slideType, existingData } = await req.json();
+    const { prompt } = await req.json();
 
-    if (!prompt || !slideType) {
+    if (!prompt) {
       return Response.json(
-        { error: 'prompt and slideType are required' },
+        { error: 'prompt is required' },
         { status: 400 }
       );
     }
 
     const message = await client.messages.create({
       model: 'claude-sonnet-4-20250514',
-      max_tokens: 1024,
+      max_tokens: 4096,
       system: SYSTEM_PROMPT,
       messages: [
         {
           role: 'user',
-          content: `Type de slide : ${slideType}
-${existingData ? `Données existantes à améliorer : ${JSON.stringify(existingData)}` : ''}
-Demande : ${prompt}`,
+          content: prompt,
         },
       ],
     });
 
-    const text =
+    const html =
       message.content[0].type === 'text' ? message.content[0].text : '';
-    const data = JSON.parse(text);
 
-    return Response.json(data);
+    // Extract title from generated HTML (look for first h1 content)
+    const titleMatch = html.match(/<h1[^>]*>([^<]+)<\/h1>/);
+    const title = titleMatch ? titleMatch[1].trim() : 'Slide généré';
+
+    return Response.json({ html, title });
   } catch (error) {
     console.error('AI generation error:', error);
     const errorMessage =

@@ -34,7 +34,9 @@ export interface Slide {
   badge?: string;
   elements: SlideElement[];
   backgroundColor: string;
-  // Données structurées selon le type
+  // HTML généré par l'IA (mode artefact)
+  htmlContent?: string;
+  // Données structurées selon le type (mode template)
   data?: {
     figures?: Array<{ value: string; label: string; unit?: string }>;
     columns?: Array<{ title: string; items: string[]; highlighted?: boolean }>;
@@ -62,19 +64,10 @@ export interface Deck {
 // Types for AI generation
 export interface GenerateRequest {
   prompt: string;
-  slideType: SlideType;
-  existingData?: Slide['data'];
+  slideType?: SlideType;
 }
 
 export interface GenerateResponse {
+  html: string;
   title: string;
-  subtitle?: string;
-  badge?: string;
-  figures?: Array<{ value: string; label: string; unit?: string }>;
-  columns?: Array<{ title: string; items: string[]; highlighted?: boolean }>;
-  steps?: Array<{ number: number; title: string; description: string }>;
-  quote?: { text: string; author: string };
-  keyMessage?: string;
-  bulletPoints?: string[];
-  number?: string;
 }
